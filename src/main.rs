@@ -1,151 +1,68 @@
-use std::{collections::HashMap, error::Error};
+mod adapters;
+mod client;
+mod errors;
+mod utils;
 
+use std::{fmt, collections::HashMap, env};
+
+use errors::main::SystemError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, to_string};
 use aws_sdk_dynamodb::{Client as DynamoDbClient, Error as DynamoDbError, types::AttributeValue};
-
+use aws_sdk_sqs::Client as SQSClient;
 use aws_sdk_eventbridge::{Client as EventBridgeClient, Error as EventBridgeError, types::PutEventsRequestEntry};
 
 use dotenv::dotenv;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-enum NotificationType {
-  Message,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-enum NotificationStatus {
-  Read,
-  Unread,
-  Removed,
-}
+use crate::adapters::memo_events::sqs_poller::{SQSPollerOption, SQSPoller, SQSPollerInterface};
+use crate::adapters::memo_api::router;
+use crate::client::dynamodb_client;
+use crate::errors::main::SerializationError;
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Router,
+};
+use std::sync::Arc;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SQSEvent {
-  detail: EventDetail,
+    detail: EventDetail,
 }
-
-#[derive(Debug, Serialize, Deserialize)]
-struct NotificationEvent {
-  version: String,
-  source: String,
-  data: EventData,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 struct EventDetail {
-  version: String,
-  id: String,
-  #[serde(rename = "type")]
-  event_type: String,
-  source: String,
-  time: String,
-  data: EventData,
+    version: String,
+    id: String,
+    #[serde(rename = "type")]
+    event_type: String,
+    source: String,
+    time: String,
+    data: EventData,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct EventData {
-  notification_id: String,
-  user_id: String,
-  replyer_id: String,
-  memo_id: String,
-  topic_id: String,
-  message_id: String,
-  content: String,
-  created_time: String,
+    notification_id: String,
+    #[serde(rename = "type")]
+    event_type: String,
+    user_id: String,
+    replyer_id: String,
+    topic_id: String,
+    message_id: String,
+    content: String,
+    created_time: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct DBNotifcation {
-  #[serde(rename = "PK")]
-  notification_id: String,
-  #[serde(rename = "SK")]
-  user_id: String,
-  replyer_id: String,
-  notification_type: NotificationType,
-  status: NotificationStatus,
-  topic_id: String,
-  message_id: String,
-  content: String,
-  created_time: String,
-  updated_time: Option<String>,
-}
-
-fn struct_to_hashmap<T: Serialize>(t: &T) -> Result<HashMap<String, AttributeValue>, Box<dyn Error>> {
-    // Convert the struct to a JSON string
-    let json = to_string(t)?;
-    let map: HashMap<String, Value> = serde_json::from_str(&json)?;
-
-    let hashmap = map.into_iter().map(|(k, v)| {
-        let attr_value = match v {
-            Value::String(s) => AttributeValue::S(s),
-            Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    AttributeValue::N(i.to_string())
-                } else if let Some(f) = n.as_f64() {
-                    AttributeValue::N(f.to_string())
-                } else {
-                    AttributeValue::Null(true)
-                }
-            },
-            Value::Bool(b) => AttributeValue::Bool(b),
-            Value::Null => AttributeValue::Null(true),
-            // Add other conversions as needed (e.g., lists, maps)
-            _ => AttributeValue::Null(true), // Fallback for unsupported types
-        };
-        (k, attr_value)
-    }).collect();
-
-    Ok(hashmap)
-}
-
-async fn store_event_in_dynamodb(event: &SQSEvent, client: &DynamoDbClient) -> Result<(), DynamoDbError> {
-    let item = DBNotifcation {
-      notification_id: event.detail.data.notification_id.clone(),
-      user_id: event.detail.data.user_id.clone(),
-      replyer_id: event.detail.data.replyer_id.clone(),
-      notification_type: NotificationType::Message,
-      status: NotificationStatus::Unread,
-      topic_id: event.detail.data.topic_id.clone(),
-      message_id: event.detail.data.message_id.clone(),
-      content: event.detail.data.content.clone(),
-      created_time: event.detail.data.created_time.clone(),
-      updated_time: None,
-    };
-
-    // Call to struct_to_hashmap and handle the result
-    let item_hashmap = match struct_to_hashmap(&item) {
-        Ok(hashmap) => {
-            // If successful, return the hashmap to use it in the next steps
-            hashmap
-        },
-        Err(e) => {
-            // If an error occurs, handle it here and possibly exit
-            eprintln!("Failed to convert struct to hashmap: {}", e);
-            return // or use std::process::exit(1) to exit with an error code
-        }
-    };
-
-    let condition_expression = "attribute_not_exists(PK) AND attribute_not_exists(SK)";
-
-    client.put_item()
-        .table_name("memo-management")
-        .set_item(Some(item_hashmap))
-        .condition_expression(condition_expression)
-        .send()
-        .await?;
-
-    Ok(())
-}
-
-async fn send_notification_event_to_eventbridge(event: &NotificationEvent, client: &EventBridgeClient) -> Result<(), EventBridgeError> {
+async fn send_notification_event_to_eventbridge(event: &EventData, client: &EventBridgeClient) -> Result<(), SystemError> {
 
     // Serialize EventData to JSON
-    let event_json = serde_json::to_string(event);
+    let event_json = serde_json::to_string(event).map_err(|e| SerializationError::new(&e.to_string()))?;
+
+    print!("event response: {:?}", event_json);
 
     let event_entry = PutEventsRequestEntry::builder()
-        .detail(event_json.unwrap())
-        .detail_type("memo:message.created-1.0.0") // Replace with your detail type
+        .detail(event_json)
+        .detail_type("Memo Event Type") // Replace with your detail type
         .source("rust-test") // Replace with your source
         .event_bus_name("eventbridge-memo-events-listener")
         .build();
@@ -153,63 +70,107 @@ async fn send_notification_event_to_eventbridge(event: &NotificationEvent, clien
     let response = client.put_events()
         .entries(event_entry)
         .send()
-        .await?;
+        .await
+        .map_err(|e| EventBridgeError::from(e))?;
 
-    println!("Response: {:?}", response);
+    println!("EventBridge response: {:?}", response);
+
     Ok(())
 }
 
 #[tokio::main]
 async fn main() {
     dotenv().ok();
+    let config = aws_config::from_env().load().await;
+    let memo_module = match env::var("MEMO_MODULE") {
+        Ok(value) => value,
+        Err(e) => {
+            eprintln!("Failed to get MEMO_MODULE from environment: {:?}", e);
+            return;
+        }
+    };
+    let memo_failure_queue = match env::var("MEMO_FAILURE_QUEUE") {
+        Ok(value) => value,
+        Err(e) => {
+            eprintln!("Failed to get MEMO_FAILURE_QUEUE from environment: {:?}", e);
+            return;
+        }
+    };
+    let memo_sqs_event_queue = match env::var("MEMO_SQS_EVENT_QUEUE") {
+        Ok(value) => value,
+        Err(e) => {
+            eprintln!("Failed to get MEMO_SQS_EVENT_QUEUE from environment: {:?}", e);
+            return;
+        }
+    };
+    if memo_module.eq(&"READER".to_string()) {
+        println!("Memo reader module is running");
+        dynamodb_client::init(&config).await;
+        let sqs_client = SQSClient::new(&config);
+        let sqs_option = SQSPollerOption {
+            sqs_client: sqs_client,
+            failure_queue: memo_failure_queue,
+            sqs_queue: memo_sqs_event_queue,
+            wait_time_seconds: Some(10),
+            max_number_of_messages: Some(10), // max is 10
+            max_retry: Some(5),
+        };
+        SQSPoller::new(sqs_option).await.start_processing().await;
+        return;
+    } else if memo_module.eq(&"SERVER".to_string()) {
+        println!("Memo server module is running");
+        dynamodb_client::init(&config).await;
+        let dynamodb_client = dynamodb_client::get().unwrap();
+
+        let app_state = Arc::new(router::AppState {
+            db_client: dynamodb_client,
+        });
+
+        let router = router::construct(app_state);
+        // Run the server
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+            .await
+            .unwrap();
+        println!("listening on {}", listener.local_addr().unwrap());
+        axum::serve(listener, router).await.unwrap();
+    } else {
+        panic!("Invalid MEMO_MODULE value: {}", memo_module)
+    }
+
     let event_json = r#"{
-      "detail": {
+    "detail": {
         "version": "1.0",
         "id": "event-id",
         "type": "memo-events-1.0.0",
         "source": "memo:monkier",
         "time": "2021-03-10T06:45:01:777614Z",
         "data": {
-          "notification_id": "unique-notification-id",
-          "replyer_id": "replyer-id",
-          "user_id": "user-id",
-          "memo_id": "456",
-          "topic_id": "topic_id",
-          "message_id": "message_id",
-          "content": "content",
-          "created_time": "2023-01-01T12:00:00Z"
+            "notification_id": "unique-notification-id-1234",
+            "type": "memo:message.created-1.0.0",
+            "replyer_id": "replyer-id",
+            "user_id": "user-id",
+            "topic_id": "topic_id",
+            "message_id": "message_id",
+            "content": "content",
+            "created_time": "2023-01-01T12:00:00Z"
+            }
         }
-      }
     }"#;
-
-    let event: SQSEvent = serde_json::from_str(event_json).expect("Failed to parse event JSON");
-
-    let config = aws_config::from_env().load().await;
-
-    let db_client = DynamoDbClient::new(&config);
 
     let event_bridge_client = EventBridgeClient::new(&config);
 
-    let event_bridge_data = NotificationEvent {
-        version: "1.0".to_string(),
-        source: "rust-test".to_string(),
-        data: EventData {
-          notification_id: "notif123".to_string(),
-          user_id: "user456".to_string(),
-          replyer_id: "replyer789".to_string(),
-          memo_id: "memo012".to_string(),
-          topic_id: "topic345".to_string(),
-          message_id: "message678".to_string(),
-          content: "Example content".to_string(),
-          created_time: "2023-01-01T00:00:00Z".to_string(),
-        }
-      };
+    let event_bridge_data = EventData {
+        event_type: "memo:message.created-1.0.0".to_string(),
+        notification_id: "notif123".to_string(),
+        user_id: "user456".to_string(),
+        replyer_id: "replyer789".to_string(),
+        topic_id: "topic345".to_string(),
+        message_id: "message678".to_string(),
+        content: "Example content".to_string(),
+        created_time: "2023-01-01T00:00:00Z".to_string(),
+    };
 
     if let Err(e) = send_notification_event_to_eventbridge(&event_bridge_data, &event_bridge_client).await {
         eprintln!("Failed to send event to eventBridge: {:?}", e);
-    }
-
-    if let Err(e) = store_event_in_dynamodb(&event, &db_client).await {
-        eprintln!("Failed to store event in DynamoDB: {:?}", e);
     }
 }
