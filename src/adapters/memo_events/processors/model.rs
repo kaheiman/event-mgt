@@ -1,10 +1,12 @@
 use serde::{Serialize, Deserialize};
 
+use crate::services::notification::NotificationService;
+
 use super::event_type::MemoEventTypes;
 
 pub struct CreateMessageProcessor {
   pub event_type: MemoEventTypes,
-  pub body: CreateMessageBody,
+  pub notification_service: NotificationService,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,9 +36,10 @@ pub struct CreateMessageDetail {
   pub created_time: String,
 }
 
+#[derive(Debug)]
 pub struct CreateMessageProcessorOption {
   pub event_type: MemoEventTypes,
-  pub body: String,
+  pub notification_service: NotificationService,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -14,6 +14,8 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use jsonwebtoken::{decode, DecodingKey, Validation, errors::Error as JwtError};
 
+use crate::services::notification::{NotificationService, NotificationServiceInterface};
+
 
 // Struct to capture the POST request body
 #[derive(Serialize, Deserialize, Debug)]
@@ -27,8 +29,8 @@ struct Claims {
     // Your claims fields
 }
 
-pub struct AppState {
-    pub db_client: DynamoDbClient,
+pub struct AppService {
+    pub notification_service: NotificationService,
 }
 
 // fn validate_jwt(token: &str, secret: &str) -> Result<Claims, JwtError> {
@@ -37,7 +39,7 @@ pub struct AppState {
 // }
 
 // Start defining routes
-pub fn construct(app_state: Arc<AppState>) -> Router {
+pub fn construct(app_state: Arc<AppService>) -> Router {
     Router::new()
         .route("/notification/message/:user_id", get(get_notification))
         .with_state(app_state)
@@ -45,7 +47,7 @@ pub fn construct(app_state: Arc<AppState>) -> Router {
 
 // GET endpoint logic
 async fn get_notification(
-    State(app_state): State<Arc<AppState>>,
+    State(app_service): State<Arc<AppService>>,
     Path(user_id): Path<String>,
     req: Request<body::Body>,
 ) -> Result<Json<Value>, StatusCode> {
@@ -58,6 +60,19 @@ async fn get_notification(
 
     println!("Token: {:?}", token);
     println!("User ID: {:?}", user_id);
+    app_service.notification_service.get_notification_by_user_id(user_id);
+    // app_state.db_client.put_item()
+    //     .table_name("memo-management")
+    //     .item(json!({
+    //         "user_id": user_id,
+    //         "token": token,
+    //     }))
+    //     .send()
+    //     .await
+    //     .map_err(|e| {
+    //         println!("Error: {:?}", e);
+    //         StatusCode::INTERNAL_SERVER_ERROR
+    //     })?;
 
     // Your logic here...
 

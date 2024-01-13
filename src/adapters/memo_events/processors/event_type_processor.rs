@@ -44,20 +44,20 @@ impl fmt::Display for RetryableError {
 impl std::error::Error for RetryableError {}
 
 #[derive(Debug)]
-pub enum ProcessorError {
+pub enum ApplicationError {
     RetryableError(RetryableError),
     PermanentError(PermanentError),
 }
 
-impl From<RetryableError> for ProcessorError {
+impl From<RetryableError> for ApplicationError {
     fn from(error: RetryableError) -> Self {
-        ProcessorError::RetryableError(error)
+        ApplicationError::RetryableError(error)
     }
 }
 
-impl From<PermanentError> for ProcessorError {
+impl From<PermanentError> for ApplicationError {
     fn from(error: PermanentError) -> Self {
-        ProcessorError::PermanentError(error)
+        ApplicationError::PermanentError(error)
     }
 }
 
@@ -65,5 +65,5 @@ impl From<PermanentError> for ProcessorError {
 pub trait EventTypeProcessorInterface {
     type Input;
     fn new(input: Self::Input) -> Self;
-    async fn process(&self) -> Result<(), ProcessorError>;
+    async fn process(&self, body: String) -> Result<(), ApplicationError>;
 }

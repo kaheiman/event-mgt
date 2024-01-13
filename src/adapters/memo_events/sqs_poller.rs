@@ -1,22 +1,22 @@
-use aws_sdk_sqs::{Client as SQSClient, types::{QueueAttributeName, Message, MessageSystemAttributeName}};
-use serde_json::Value;
-use tokio::task;
-use async_trait::async_trait;
-use tokio::time::{sleep, Duration};
+use std::time::Duration;
 
-use super::processors::{event_type::MemoEventTypes, model::{CreateMessageProcessorOption, CreateMessageProcessor}, event_type_processor::EventTypeProcessorInterface};
+use aws_sdk_sqs::{Client as SQSClient, types::{Message, QueueAttributeName, MessageSystemAttributeName}};
+
+use async_trait::async_trait;
+use serde_json::Value;
+use tokio::time::sleep;
+
+use crate::services::notification::NotificationService;
+
+use super::processors::{model::{CreateMessageProcessor, CreateMessageProcessorOption}, event_type::MemoEventTypes, event_type_processor::EventTypeProcessorInterface};
 
 #[async_trait]
 pub trait SQSPollerInterface {
     async fn new(option: SQSPollerOption) -> Self;
     async fn start_processing(&mut self);
     async fn stop_processing(&self);
-}
-
-#[async_trait]
-trait SQSPollerPrivateInterface {
-    async fn poll_once(poller: SQSPoller);
-    async fn delegate_event_to_processor(message: Message);
+    async fn poll_once(&mut self);
+    async fn delegate_event_to_processor(&self, message: Message);
 }
 
 
@@ -27,9 +27,9 @@ pub struct SQSPollerOption {
     pub wait_time_seconds: Option<i32>,
     pub max_number_of_messages: Option<i32>,
     pub max_retry: Option<i32>,
+    pub notification_service: NotificationService,
 }
 
-#[derive(Debug, Clone)]
 pub struct SQSPoller {
     processing: bool,
     sqs_client: SQSClient,
@@ -38,18 +38,45 @@ pub struct SQSPoller {
     wait_time_seconds: i32,
     max_number_of_messages: i32,
     max_retry: i32,
+    create_message_processor: CreateMessageProcessor,
 }
 
-
 #[async_trait]
-impl SQSPollerPrivateInterface for SQSPoller {
+impl SQSPollerInterface for SQSPoller {
+    async fn new(option: SQSPollerOption) -> Self {
+        let create_message_processor = CreateMessageProcessor::new(CreateMessageProcessorOption {
+            event_type: MemoEventTypes::CreateMessage,
+            notification_service: option.notification_service,
+        });
+        SQSPoller {
+            processing: false,
+            sqs_client: option.sqs_client,
+            sqs_queue: option.sqs_queue,
+            failure_queue: option.failure_queue,
+            wait_time_seconds: option.wait_time_seconds.unwrap_or(10),
+            max_retry: option.max_retry.unwrap_or(10),
+            max_number_of_messages: option.max_number_of_messages.unwrap_or(10),
+            create_message_processor: create_message_processor,
+        }
+    }
 
-    async fn poll_once(poller: SQSPoller) {
-        let resp = poller.sqs_client.receive_message()
-            .queue_url(poller.sqs_queue)
-            .max_number_of_messages(poller.max_number_of_messages)
+    async fn start_processing(&mut self) {
+        self.processing = true;
+        let mut i = 0;
+        while self.processing {
+            self.poll_once().await;
+            println!("Sleeping for 5 seconds... {:?}", i);
+            sleep(Duration::from_secs(5)).await;
+            i += 1;
+        }
+    }
+
+    async fn poll_once(&mut self) {
+        let resp = self.sqs_client.receive_message()
+            .queue_url(self.sqs_queue.clone())
+            .max_number_of_messages(self.max_number_of_messages)
             .attribute_names(QueueAttributeName::All)
-            .wait_time_seconds(poller.wait_time_seconds)
+            .wait_time_seconds(self.wait_time_seconds)
             .send()
             .await
             .unwrap();
@@ -58,7 +85,7 @@ impl SQSPollerPrivateInterface for SQSPoller {
             Some(messages) => {
                 for message in messages {
                     println!("Received Message: {:?}", message);
-                    SQSPoller::delegate_event_to_processor(message).await;
+                    self.delegate_event_to_processor(message).await;
                     // let receipt_handle = message.receipt_handle.unwrap();
                     // let body = message.body.unwrap();
                     // let message_id = message.message_id.unwrap();
@@ -73,7 +100,7 @@ impl SQSPollerPrivateInterface for SQSPoller {
         }
     }
 
-    async fn delegate_event_to_processor(message: Message) {
+    async fn delegate_event_to_processor(&self, message: Message) {
         let mut reveived_count: Option<i32> = None;
         if let Some(attribute) = message.attributes {
             if let Some(count) = attribute.get(&MessageSystemAttributeName::ApproximateReceiveCount) {
@@ -86,10 +113,7 @@ impl SQSPollerPrivateInterface for SQSPoller {
                 if let Some(detail_type) = json["detail"]["type"].as_str() {
                     match detail_type {
                         "memo:message.created-1.0.0" => {
-                            let result = CreateMessageProcessor::new(CreateMessageProcessorOption {
-                                event_type: MemoEventTypes::CreateMessage,
-                                body: body,
-                            }).process().await;
+                            let result = self.create_message_processor.process(body).await;
                             match result {
                                 Ok(_) => {
                                     println!("EventProcessor::delegate_event_to_processor: CreateMessageProcessor::process: Ok");
@@ -114,36 +138,6 @@ impl SQSPollerPrivateInterface for SQSPoller {
                 }
             }
 
-        }
-    }
-}
-
-
-#[async_trait]
-impl SQSPollerInterface for SQSPoller {
-    async fn new(option: SQSPollerOption) -> Self {
-        SQSPoller {
-            processing: false,
-            sqs_client: option.sqs_client,
-            sqs_queue: option.sqs_queue,
-            failure_queue: option.failure_queue,
-            wait_time_seconds: option.wait_time_seconds.unwrap_or(10),
-            max_retry: option.max_retry.unwrap_or(10),
-            max_number_of_messages: option.max_number_of_messages.unwrap_or(10),
-        }
-    }
-
-    async fn start_processing(&mut self) {
-        self.processing = true;
-        let mut i = 0;
-        while self.processing {
-            let processing_talk = task::spawn(
-                SQSPoller::poll_once(self.clone())
-            );
-            let _ = processing_talk.await;
-            println!("Sleeping for 5 seconds... {:?}", i);
-            sleep(Duration::from_secs(5)).await;
-            i += 1;
         }
     }
 

@@ -2,27 +2,22 @@ mod adapters;
 mod client;
 mod errors;
 mod utils;
+mod services;
+use std::env;
 
-use std::{fmt, collections::HashMap, env};
-
+use aws_sdk_dynamodb::Client as DynamoDbClient;
 use errors::main::SystemError;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, to_string};
-use aws_sdk_dynamodb::{Client as DynamoDbClient, Error as DynamoDbError, types::AttributeValue};
 use aws_sdk_sqs::Client as SQSClient;
 use aws_sdk_eventbridge::{Client as EventBridgeClient, Error as EventBridgeError, types::PutEventsRequestEntry};
 
 use dotenv::dotenv;
-use crate::adapters::memo_events::sqs_poller::{SQSPollerOption, SQSPoller, SQSPollerInterface};
+use services::notification::NotificationService;
+use services::store::DatabaseStoreService;
+use crate::adapters::memo_events::sqs_poller::{SQSPoller, SQSPollerOption, SQSPollerInterface};
 use crate::adapters::memo_api::router;
 use crate::client::dynamodb_client;
 use crate::errors::main::SerializationError;
-use axum::{
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::get,
-    Router,
-};
 use std::sync::Arc;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,6 +46,17 @@ struct EventData {
     message_id: String,
     content: String,
     created_time: String,
+}
+
+fn build_notification_service(db_client: DynamoDbClient, table_name: String) -> NotificationService {
+    let db_service = DatabaseStoreService {
+        store: db_client,
+        table_name: table_name,
+    };
+    let notification_service = NotificationService {
+        database_store_service: db_service,
+    };
+    return notification_service;
 }
 
 async fn send_notification_event_to_eventbridge(event: &EventData, client: &EventBridgeClient) -> Result<(), SystemError> {
@@ -103,17 +109,27 @@ async fn main() {
             return;
         }
     };
+    let dynamo_db_table_name = match env::var("DYNAMODB_TABLE_NAME") {
+        Ok(value) => value,
+        Err(e) => {
+            eprintln!("Failed to get DYNAMODB_TABLE_NAME from environment: {:?}", e);
+            return;
+        }
+    };
     if memo_module.eq(&"READER".to_string()) {
         println!("Memo reader module is running");
         dynamodb_client::init(&config).await;
+        let dynamodb_client = dynamodb_client::get().unwrap();
+        let notification_service = build_notification_service(dynamodb_client, dynamo_db_table_name);
         let sqs_client = SQSClient::new(&config);
-        let sqs_option = SQSPollerOption {
+        let sqs_option =  SQSPollerOption {
             sqs_client: sqs_client,
-            failure_queue: memo_failure_queue,
             sqs_queue: memo_sqs_event_queue,
+            failure_queue: memo_failure_queue,
             wait_time_seconds: Some(10),
             max_number_of_messages: Some(10), // max is 10
             max_retry: Some(5),
+            notification_service: notification_service,
         };
         SQSPoller::new(sqs_option).await.start_processing().await;
         return;
@@ -121,12 +137,11 @@ async fn main() {
         println!("Memo server module is running");
         dynamodb_client::init(&config).await;
         let dynamodb_client = dynamodb_client::get().unwrap();
-
-        let app_state = Arc::new(router::AppState {
-            db_client: dynamodb_client,
+        let app_service = Arc::new(router::AppService {
+            notification_service: build_notification_service(dynamodb_client, dynamo_db_table_name),
         });
 
-        let router = router::construct(app_state);
+        let router = router::construct(app_service);
         // Run the server
         let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
             .await
