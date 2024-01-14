@@ -49,16 +49,16 @@ pub enum NotificationType {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NotificationStatus {
-    Read,
-    Unread,
-    Removed,
+    READ,
+    UNREAD,
+    REMOVED,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DBNotifcation {
-    #[serde(rename = "PK")]
-    pub notification_id: String,
     #[serde(rename = "SK")]
+    pub notification_id: String,
+    #[serde(rename = "PK")]
     pub user_id: String,
     pub replyer_id: String,
     pub notification_type: NotificationType,
