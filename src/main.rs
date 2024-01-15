@@ -20,6 +20,8 @@ use crate::client::dynamodb_client;
 use crate::errors::main::SerializationError;
 use std::sync::Arc;
 
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
 #[derive(Debug, Serialize, Deserialize)]
 struct SQSEvent {
     detail: EventDetail,
@@ -86,12 +88,27 @@ async fn send_notification_event_to_eventbridge(event: &EventData, client: &Even
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "memo-events-mgt=info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     dotenv().ok();
     let config = aws_config::from_env().load().await;
     let memo_module = match env::var("MEMO_MODULE") {
         Ok(value) => value,
         Err(e) => {
             eprintln!("Failed to get MEMO_MODULE from environment: {:?}", e);
+            return;
+        }
+    };
+    let jwt_secret = match env::var("JWT_SECRET") {
+        Ok(value) => value,
+        Err(e) => {
+            eprintln!("Failed to get JWT_SECRET from environment: {:?}", e);
             return;
         }
     };
@@ -134,7 +151,7 @@ async fn main() {
         SQSPoller::new(sqs_option).await.start_processing().await;
         return;
     } else if memo_module.eq(&"SERVER".to_string()) {
-        println!("Memo server module is running");
+        tracing::info!("Memo server module is running");
         dynamodb_client::init(&config).await;
         let dynamodb_client = dynamodb_client::get().unwrap();
         let app_service = Arc::new(router::AppService {
@@ -146,7 +163,7 @@ async fn main() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
             .await
             .unwrap();
-        println!("listening on {}", listener.local_addr().unwrap());
+        tracing::info!("listening on {}", listener.local_addr().unwrap());
         axum::serve(listener, router).await.unwrap();
     } else {
         panic!("Invalid MEMO_MODULE value: {}", memo_module)
