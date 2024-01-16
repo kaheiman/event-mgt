@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio::time::sleep;
 
-use crate::services::notification::NotificationService;
+use crate::{services::notification::NotificationService, adapters::memo_events::processors::event_type_processor as event_type_processor};
 
 use super::processors::{model::{CreateMessageProcessor, CreateMessageProcessorOption}, event_type::MemoEventTypes, event_type_processor::EventTypeProcessorInterface};
 
@@ -65,7 +65,7 @@ impl SQSPollerInterface for SQSPoller {
         let mut i = 0;
         while self.processing {
             self.poll_once().await;
-            println!("Sleeping for 5 seconds... {:?}", i);
+            tracing::info!("Sleeping for 5 seconds... {:?}", i);
             sleep(Duration::from_secs(5)).await;
             i += 1;
         }
@@ -83,8 +83,8 @@ impl SQSPollerInterface for SQSPoller {
 
         match resp.messages {
             Some(messages) => {
+                tracing::info!("Received number of Message: {:?}", messages.len());
                 for message in messages {
-                    println!("Received Message: {:?}", message);
                     self.delegate_event_to_processor(message).await;
                     // let receipt_handle = message.receipt_handle.unwrap();
                     // let body = message.body.unwrap();
@@ -95,7 +95,7 @@ impl SQSPollerInterface for SQSPoller {
                 }
             },
             None => {
-                println!("No messages found...");
+                tracing::info!("No messages found...");
             }
         }
     }
@@ -108,27 +108,67 @@ impl SQSPollerInterface for SQSPoller {
             }
         }
         if let Some(body) = message.body {
+            let ref_body = &body;
             if let Ok(json) = serde_json::from_str::<Value>(&body) {
                 // Extract detail.type
                 if let Some(detail_type) = json["detail"]["type"].as_str() {
                     match detail_type {
                         "memo:message.created-1.0.0" => {
-                            let result = self.create_message_processor.process(body).await;
+                            let result = self.create_message_processor.process(ref_body.to_owned()).await;
                             match result {
                                 Ok(_) => {
-                                    println!("EventProcessor::delegate_event_to_processor: CreateMessageProcessor::process: Ok");
+                                    self.sqs_client.delete_message()
+                                        .queue_url(self.sqs_queue.clone())
+                                        .receipt_handle(message.receipt_handle.unwrap())
+                                        .send()
+                                        .await
+                                        .unwrap();
+                                    tracing::info!("Deleted event from the queue");
                                 },
                                 Err(err) => {
-                                    if let Some(reveived_count) = reveived_count {
-                                        println!("reveived_count: {:?}", reveived_count);
+                                    match err {
+                                        event_type_processor::ApplicationError::RetryableError(retry_err) => {
+                                            // tracing::info!(format!("event is retryable: {:?}", RetryableError));
+                                            tracing::error!("event retryable error: {:?}", retry_err);
+                                            if let Some(reveived_count) = reveived_count {
+                                                if reveived_count > self.max_retry {
+                                                    // send event to DLQ
+                                                    self.sqs_client.send_message()
+                                                        .queue_url(self.failure_queue.clone())
+                                                        .message_body(ref_body.to_owned())
+                                                        .send()
+                                                        .await
+                                                        .unwrap();
+                                                    self.sqs_client.delete_message()
+                                                        .queue_url(self.sqs_queue.clone())
+                                                        .receipt_handle(message.receipt_handle.unwrap())
+                                                        .send()
+                                                        .await
+                                                        .unwrap();
+                                                }
+                                            }
+                                        },
+                                        event_type_processor::ApplicationError::PermanentError(perm_err)=> {
+                                            // tracing::info!(format!("event is permanent: {:?}", PermanentError));
+                                            tracing::error!("event permanent error: {:?}", perm_err);
+                                            // send event to DLQ
+                                            self.sqs_client.send_message()
+                                                .queue_url(self.failure_queue.clone())
+                                                .message_body(ref_body.to_owned())
+                                                .send()
+                                                .await
+                                                .unwrap();
+                                            self.sqs_client.delete_message()
+                                                .queue_url(self.sqs_queue.clone())
+                                                .receipt_handle(message.receipt_handle.unwrap())
+                                                .send()
+                                                .await
+                                                .unwrap();
+                                        },
                                     }
-                                    println!("EventProcessor::delegate_event_to_processor: CreateMessageProcessor::process: Err: {:?}", err);
                                 },
 
                             }
-                            // response reuslt error
-                            // if error check how many time and put back into deadletter queue
-                            // if true remove from queue
                         },
                         _ => {
                             println!("EventProcessor::delegate_event_to_processor: event_type is not found");

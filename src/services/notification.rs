@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use crate::{
   utils::utils::struct_to_hashmap,
-  adapters::memo_events::processors::{model::{CreateMessageBody, DBNotifcation, NotificationType, NotificationStatus},
-  event_type_processor::{PermanentError, ApplicationError, RetryableError}}
+  adapters::{memo_events::processors::{model::{CreateMessageBody, DBNotifcation, NotificationType, NotificationStatus},
+  event_type_processor::{PermanentError, ApplicationError, RetryableError}}, memo_api::router::UpdateNotificationBody}
 };
 use serde_dynamo::from_items;
 
@@ -13,7 +13,7 @@ use super::store::{DatabaseStoreService, DatabaseStoreInterface};
 pub trait NotificationServiceInterface {
   async fn create_notification_message(&self, body: CreateMessageBody) -> Result<(), ApplicationError>;
   async fn get_notification_by_user_id(&self, user_id: String) -> Result<Vec<DBNotifcation>, ApplicationError>;
-  async fn update_notification_message(&self, user_id: String, noti_id: String) -> Result<(), ApplicationError>;
+  async fn update_notification_message(&self, user_id: String, noti_id: String, payload: UpdateNotificationBody) -> Result<(), ApplicationError>;
 }
 
 // Define the struct implementing the trait
@@ -24,7 +24,7 @@ pub struct NotificationService {
 
 #[async_trait]
 impl NotificationServiceInterface for NotificationService {
-  async fn update_notification_message(&self, user_id: String, noti_id: String) -> Result<(), ApplicationError> {
+  async fn update_notification_message(&self, user_id: String, noti_id: String, payload: UpdateNotificationBody) -> Result<(), ApplicationError> {
     let noti_output  = self.database_store_service
       .db_get_notification_item_with_pk_sk(
         format!("USR#{}", user_id),
@@ -37,7 +37,7 @@ impl NotificationServiceInterface for NotificationService {
           .db_update_notification_message(
             user_id,
             noti_id,
-            NotificationStatus::READ
+            payload.action,
           )
           .await.map_err(|e| RetryableError::new(&e.to_string()))?;
     } else {

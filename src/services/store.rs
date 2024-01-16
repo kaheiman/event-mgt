@@ -1,5 +1,4 @@
 use aws_sdk_dynamodb::{Client as DynamoDbClient, Error as DynamoDbError, types::AttributeValue, operation::{query::QueryOutput, get_item::GetItemOutput}};
-use chrono::format;
 use std::collections::HashMap;
 use async_trait::async_trait;
 
