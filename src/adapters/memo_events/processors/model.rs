@@ -26,10 +26,11 @@ pub struct CreateMessageBody {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateMessageDetail {
   pub notification_id: String,
-  #[serde(rename = "type")]
-  pub message_filter_type: String,
+  pub event_type: String,
   pub user_id: String,
   pub replyer_id: String,
+  pub replyer_name: String,
+  pub replyer_avatar: String,
   pub topic_id: String,
   pub message_id: String,
   pub content: String,
@@ -61,6 +62,8 @@ pub struct DBNotifcation {
     #[serde(rename = "PK")]
     pub user_id: String,
     pub replyer_id: String,
+    pub replyer_avatar: String,
+    pub replyer_name: String,
     pub notification_type: NotificationType,
     pub status: NotificationStatus,
     pub topic_id: String,

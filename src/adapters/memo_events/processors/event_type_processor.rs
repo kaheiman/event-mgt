@@ -3,7 +3,7 @@ use std::fmt;
 
 #[derive(Debug)]
 pub struct PermanentError {
-    message: String,
+    pub message: String,
 }
 
 impl PermanentError {
@@ -24,7 +24,7 @@ impl std::error::Error for PermanentError {}
 
 #[derive(Debug)]
 pub struct RetryableError {
-    message: String,
+    pub message: String,
 }
 
 impl RetryableError {

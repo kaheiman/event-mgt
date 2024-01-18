@@ -41,6 +41,8 @@ struct EventData {
     event_type: String,
     user_id: String,
     replyer_id: String,
+    replyer_name: String,
+    replyer_avatar: String,
     topic_id: String,
     message_id: String,
     content: String,

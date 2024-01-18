@@ -111,9 +111,10 @@ impl SQSPollerInterface for SQSPoller {
             let ref_body = &body;
             if let Ok(json) = serde_json::from_str::<Value>(&body) {
                 // Extract detail.type
-                if let Some(detail_type) = json["detail"]["type"].as_str() {
+                if let Some(detail_type) = json["detail"]["event_type"].as_str() {
                     match detail_type {
                         "memo:message.created-1.0.0" => {
+                            tracing::info!("EventProcessor::delegate_event_to_processor: event_type is CreateMessage");
                             let result = self.create_message_processor.process(ref_body.to_owned()).await;
                             match result {
                                 Ok(_) => {
@@ -123,7 +124,7 @@ impl SQSPollerInterface for SQSPoller {
                                         .send()
                                         .await
                                         .unwrap();
-                                    tracing::info!("Deleted event from the queue");
+                                    tracing::info!("Process successfully, deleted event from the queue");
                                 },
                                 Err(err) => {
                                     match err {

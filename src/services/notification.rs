@@ -68,6 +68,8 @@ impl NotificationServiceInterface for NotificationService {
       notification_id: format!("NTF#{}",body.detail.notification_id.clone()),
       user_id: format!("USR#{}", body.detail.user_id.clone()),
       replyer_id: body.detail.replyer_id.clone(),
+      replyer_avatar: body.detail.replyer_avatar.clone(),
+      replyer_name: body.detail.replyer_name.clone(),
       notification_type: NotificationType::Message,
       status: NotificationStatus::UNREAD,
       topic_id: body.detail.topic_id.clone(),

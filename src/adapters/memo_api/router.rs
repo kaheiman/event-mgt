@@ -34,8 +34,6 @@ struct Claims {
     uid: String,
     name: String,
     email: String,
-    created_at: i64,
-    expired_at: i64,
     iat: i64,
     exp: i64,
 }

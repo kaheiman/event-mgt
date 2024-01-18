@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::services::notification::NotificationServiceInterface;
 
 use super::{
-  event_type_processor::{EventTypeProcessorInterface, ApplicationError },
+  event_type_processor::{EventTypeProcessorInterface, ApplicationError, PermanentError },
   model::{CreateMessageProcessor, CreateMessageProcessorOption, CreateMessageBody}
 };
 
@@ -21,7 +21,9 @@ impl EventTypeProcessorInterface for CreateMessageProcessor {
 
   async fn process(&self, body: String) -> Result<(), ApplicationError>{
     // let parsed: CreateMessageBody = serde_json::from_str(input.body.as_str()).expect("CreateMessageBody was not well-formatted");
-    let parsed: CreateMessageBody = serde_json::from_str(body.as_str()).expect("CreateMessageBody was not well-formatted");
+    // .expect("CreateMessageBody was not well-formatted");
+    let parsed: CreateMessageBody = serde_json::from_str(body.as_str()).map_err(|e| ApplicationError::PermanentError(PermanentError{ message: format!("CreateMessageBody was not well-formatted {:?}", e) }))?;
+    tracing::info!("CreateMessageProcessor::process {:?}", parsed);
     self.notification_service.create_notification_message(parsed).await?;
     Ok(())
   }
