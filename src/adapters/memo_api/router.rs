@@ -69,8 +69,8 @@ pub struct AppService {
 // Start defining routes
 pub fn construct(app_state: Arc<AppService>) -> Router {
     Router::new()
-        .route("/notification/message/:user_id", get(get_notification))
-        .route("/notification/message/:user_id/:noti_id", post(update_notification_status))
+        .route("/n/notification/message/:user_id", get(get_notification))
+        .route("/n/notification/message/:user_id/:noti_id", post(update_notification_status))
         .with_state(app_state)
         .layer(middleware::from_fn(print_request_response))
 }
