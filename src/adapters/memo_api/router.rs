@@ -88,8 +88,14 @@ async fn get_notification(
     }
     let result = app_service.notification_service.get_notification_by_user_id(user_id).await;
     match result {
-        Ok(notification) => {
+        Ok(mut notification) => {
             tracing::info!("Notification: {:?}", notification);
+            for notif in notification.iter_mut() {
+                // Remove "USR#" prefix from PK
+                notif.user_id = notif.user_id.strip_prefix("USR#").unwrap_or(&notif.user_id).to_string();
+                // Remove "NTF#" prefix from SK
+                notif.notification_id = notif.notification_id.strip_prefix("NTF#").unwrap_or(&notif.notification_id).to_string();
+            }
             let resp_json = to_value(notification).expect("Failed to serialize notification");
             Ok(AxumJson(serde_json::json!({"message": "succeeded", "data": resp_json })))
         },
