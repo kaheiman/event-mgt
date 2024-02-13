@@ -1,10 +1,9 @@
 use async_trait::async_trait;
 
-use crate::services::notification::NotificationServiceInterface;
-
-use super::{
-  event_type_processor::{EventTypeProcessorInterface, ApplicationError, PermanentError },
-  model::{CreateMessageProcessor, CreateMessageProcessorOption, CreateMessageBody}
+use crate::{
+  services::notification::NotificationServiceInterface,
+  adapters::memo_events::processors::event_type_processor::{EventTypeProcessorInterface, ApplicationError, PermanentError },
+  adapters::memo_events::processors::model::{CreateMessageProcessor, CreateMessageProcessorOption, CreateMessageBody}
 };
 
 #[async_trait]

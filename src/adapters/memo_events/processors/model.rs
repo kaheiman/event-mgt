@@ -1,8 +1,9 @@
 use serde::{Serialize, Deserialize};
 
-use crate::services::notification::NotificationService;
-
-use super::event_type::MemoEventTypes;
+use crate::{
+  services::notification::NotificationService,
+  adapters::memo_events::processors::event_type::MemoEventTypes,
+};
 
 pub struct CreateMessageProcessor {
   pub event_type: MemoEventTypes,

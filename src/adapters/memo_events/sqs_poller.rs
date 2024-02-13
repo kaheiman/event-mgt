@@ -1,14 +1,14 @@
 use std::time::Duration;
-
 use aws_sdk_sqs::{Client as SQSClient, types::{Message, QueueAttributeName, MessageSystemAttributeName}};
-
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::time::sleep;
 
-use crate::{services::notification::NotificationService, adapters::memo_events::processors::event_type_processor as event_type_processor};
+use crate::{
+    services::notification::NotificationService, adapters::memo_events::processors::event_type_processor as event_type_processor,
+    adapters::memo_events::processors::{model::{CreateMessageProcessor, CreateMessageProcessorOption}, event_type::MemoEventTypes, event_type_processor::EventTypeProcessorInterface}
+};
 
-use super::processors::{model::{CreateMessageProcessor, CreateMessageProcessorOption}, event_type::MemoEventTypes, event_type_processor::EventTypeProcessorInterface};
 
 #[async_trait]
 pub trait SQSPollerInterface {

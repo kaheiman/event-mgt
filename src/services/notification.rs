@@ -1,12 +1,12 @@
 use async_trait::async_trait;
+use serde_dynamo::from_items;
+
 use crate::{
   utils::utils::struct_to_hashmap,
   adapters::{memo_events::processors::{model::{CreateMessageBody, DBNotifcation, NotificationType, NotificationStatus},
-  event_type_processor::{PermanentError, ApplicationError, RetryableError}}, memo_api::router::UpdateNotificationBody}
+  event_type_processor::{PermanentError, ApplicationError, RetryableError}}, memo_api::router::UpdateNotificationBody},
+  services::store::{DatabaseStoreService, DatabaseStoreInterface}
 };
-use serde_dynamo::from_items;
-
-use super::store::{DatabaseStoreService, DatabaseStoreInterface};
 
 // Define the trait for database operations
 #[async_trait]

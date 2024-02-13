@@ -1,23 +1,23 @@
+use std::env;
+use aws_sdk_dynamodb::Client as DynamoDbClient;
+use serde::{Deserialize, Serialize};
+use aws_sdk_sqs::Client as SQSClient;
+use std::sync::Arc;
+use dotenv::dotenv;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
 mod adapters;
 mod client;
 mod errors;
 mod utils;
 mod services;
-use std::env;
 
-use aws_sdk_dynamodb::Client as DynamoDbClient;
-use serde::{Deserialize, Serialize};
-use aws_sdk_sqs::Client as SQSClient;
-
-use dotenv::dotenv;
 use services::notification::NotificationService;
 use services::store::DatabaseStoreService;
-use crate::adapters::memo_events::sqs_poller::{SQSPoller, SQSPollerOption, SQSPollerInterface};
-use crate::adapters::memo_api::router;
-use crate::client::dynamodb_client;
-use std::sync::Arc;
+use adapters::memo_events::sqs_poller::{SQSPoller, SQSPollerOption, SQSPollerInterface};
+use adapters::memo_api::router;
+use client::dynamodb_client;
 
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SQSEvent {

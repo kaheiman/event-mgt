@@ -18,9 +18,12 @@ use serde_json::{json, Value, to_value};
 use std::sync::Arc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use http_body_util::BodyExt;
-
-use crate::{services::notification::{NotificationService, NotificationServiceInterface}, adapters::memo_events::processors::model::NotificationStatus};
 use once_cell::sync::Lazy;
+
+use crate::{
+    services::notification::{NotificationService, NotificationServiceInterface},
+    adapters::memo_events::processors::model::NotificationStatus
+};
 
 
 static KEYS: Lazy<Keys> = Lazy::new(|| {
