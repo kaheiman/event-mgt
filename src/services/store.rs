@@ -70,15 +70,21 @@ impl DatabaseStoreInterface for DatabaseStoreService {
         let user_id_attr = AttributeValue::S(format!("USR#{}", user_id));
         let unread_status_attr = AttributeValue::S(format!("{:?}", NotificationStatus::UNREAD));
 
+        // another way sort by date without using GSI is
+        // Table Structure
+        // Partition Key (PK): USER#<UserId> (e.g., USER#123)
+        // Sort Key (SK): NOTIFICATION#<Timestamp> (e.g., NOTIFICATION#2023-03-15T12:34:56Z)
+
         let result = self.store.query()
             .table_name(self.table_name.clone())
+            .index_name("PK-created_time-index")
             .key_condition_expression("#pk = :user_id")
             .filter_expression("#status = :unread_status")
             .expression_attribute_names("#pk", "PK")
             .expression_attribute_names("#status", "status")
             .expression_attribute_values(":user_id", user_id_attr)
             .expression_attribute_values(":unread_status", unread_status_attr)
-            .scan_index_forward(false)
+            .scan_index_forward(false) // most recent data first
             .limit(20)
             .send()
             .await?;
